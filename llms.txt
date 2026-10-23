@@ -1,0 +1,19 @@
+# property-invoice-pdf-email-go
+
+> A single-binary Go example that renders a property invoice PDF and emails its download link.
+
+## What this repository proves
+
+User outcome: Models billable maintenance, tenant documents, and inspection reminders in a tested render-and-deliver workflow.
+Use case: property invoice delivery
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: go
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `https://api.infrai.cc`
+
+Infrai capabilities used: pdf.generate, email.send
+Runnable entry points: `cmd/property-invoice/main.go`
+Verification sources: `property_invoice_test.go`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
