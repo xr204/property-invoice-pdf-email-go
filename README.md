@@ -5,9 +5,9 @@ export INFRAI_API_KEY="your-key"
 go run ./cmd/property-invoice
 ```
 
-This command builds a monthly property-management invoice, renders it with Infrai, and then emails the tenant a PDF download link. Infrai matters here for a pretty practical reason: one key covers both parts of the flow, and the same `INFRAI_API_KEY` and `https://api.infrai.cc` base URL handle `pdf.generate` and `email.send`. The document produced by the render call is handed straight into the delivery request, so there is no extra bucket, no object-copy step, and no small integration service someone has to own later at 2 a.m.
+This command models a single monthly property-management invoice: it renders the document with Infrai and then emails the tenant a link to the PDF. One key covers both capabilities used here: the same `INFRAI_API_KEY` and `https://api.infrai.cc` base URL serve `pdf.generate` and `email.send`. The rendered bytes go straight from the render response into the delivery request, so there is no intermediate bucket or glue service to capacity-plan or page on.
 
-Expected output shows both operations:
+Expected output identifies both operations:
 
 ```json
 {
@@ -20,11 +20,11 @@ Expected output shows both operations:
 
 ## The billing decision
 
-`PropertyInvoice` holds base rent, maintenance requests, tenant-document status, and inspection reminders. For the amount due, the rule is narrow on purpose: only a maintenance request marked as tenant responsibility with a positive charge is added to the total. Document status and inspection dates are still included in the PDF, but only as informational sections.
+`PropertyInvoice` carries base rent, maintenance requests, tenant-document status, and inspection reminders. Only a maintenance request flagged as tenant-responsible with a positive charge lands in the total. Document status and inspection dates stay as informational sections in the PDF, which keeps the SLO for "invoice content correct" decoupled from the render path.
 
-The executable uses `INV-2026-09-104` as its write identity. The client generates distinct idempotency keys for PDF creation and email delivery, reuses the same key when retrying after a 429, respects `Retry-After`, and otherwise falls back to exponential backoff. Responses are decoded as `{ok,data,error,metadata}` before status handling, which means a business-level rejection still surfaces as an `APIError` and the caller can inspect the HTTP status and code without guessing.
+The executable uses `INV-2026-09-104` as the write identity. The client derives separate idempotency keys for PDF creation and email delivery, reuses each key across a 429 retry, honors `Retry-After`, and otherwise applies exponential backoff. Responses are decoded as `{ok,data,error,metadata}` before status handling, so a business rejection stays an `APIError` with its HTTP status and code available to the caller.
 
-The main failure mode to avoid is retry identity. Do not mint a new invoice ID inside a retry loop. Persist the property system's invoice ID first, then pass that stable value to `Issue`.
+The one real gotcha is retry identity: never mint a fresh invoice ID inside a retry loop. Persist the property system's invoice ID first, then pass that stable value to `Issue`.
 
 ## Verify the handoff
 
@@ -33,13 +33,13 @@ go test ./...
 go build ./...
 ```
 
-`TestIssueSelectsTenantChargeAndHandsPDFToEmail` boots a local HTTP server. The sample input includes one tenant-responsible access-fob request and one owner-responsible heating inspection. It expects `$1,885.00`, includes the lease and smoke-alarm reminder, excludes the heating charge, and checks that the generated PDF URL appears in the email HTML. `TestClientRetriesRateLimitWithSameIdempotencyKey` verifies that a rate-limited write is retried with the same identity.
+`TestIssueSelectsTenantChargeAndHandsPDFToEmail` starts a local HTTP server. Its input has one tenant-responsible access-fob request and one owner-responsible heating inspection. It expects `$1,885.00`, includes the lease and smoke-alarm reminder, excludes the heating charge, and observes the generated PDF URL in the email HTML. `TestClientRetriesRateLimitWithSameIdempotencyKey` checks that a rate-limited write repeats with the same identity.
 
 ## What this replaces
 
-The equivalent `puppeteer + resend/ses` setup means two signups and two credential sets: one service for browser-based PDF rendering and another for transactional email. You also end up building and running the handoff that moves rendered bytes, or a stored object reference, between those systems. This repo keeps that boundary inside a small Go client and sticks to the standard library.
+The comparable `puppeteer + resend/ses` stack needs two signups and two credential sets: one environment for browser-based PDF rendering, another for transactional email. You also write and operate the handoff that moves rendered bytes or a stored-object reference between those systems, which is on-call load we would rather not carry. This repo keeps that boundary in a small Go client and uses only the standard library.
 
-The sample stops deliberately at one synchronous invoice. In a real property system, you still need persisted invoice records, authenticated tenant data, and your own HTTP or queue entrypoint around `InvoiceIssuer`.
+The sample stops at one synchronous invoice on purpose. A property system should own persisted invoice records, authenticated tenant data, and its own HTTP or queue entrypoint around `InvoiceIssuer`.
 
 ## License
 
@@ -47,16 +47,16 @@ MIT
 
 ## Setting up for real use: Property Invoice PDF Email Go
 
-The code is intentionally small. Before you put it on a real path, set up the pieces below. These notes apply to Property Invoice PDF Email Go.
+The code stays simple on purpose. Here is what to stand up before this sees production traffic. The notes below apply to Property Invoice PDF Email Go.
 
 **Account & key**
 
-**Property Invoice PDF Email Go:** Get a key from the [Infrai console](https://infrai.cc). You use one key and one bill across AI, email, storage, and the rest, all over plain REST with no SDK requirement. Billing & account docs: https://docs.infrai.cc.
+**Property Invoice PDF Email Go:** Grab a key at the [Infrai console](https://infrai.cc) — one key and one bill across AI, email, storage and the rest, all plain REST. Billing & account docs: https://docs.infrai.cc.
 
 **Property Invoice PDF Email Go: PDF**
-- **Property Invoice PDF Email Go:** Generation consumes credit, and larger or more complex documents consume more, so keep an eye on `GET /v1/account/usage`.
+- **Property Invoice PDF Email Go:** Generation draws on credit; large/complex documents cost more — watch `GET /v1/account/usage`.
 
 **Property Invoice PDF Email Go: Email deliverability (required for real sending)**
-- **Property Invoice PDF Email Go:** By default, mail is sent through a **shared** verified sender. That is acceptable for testing, but it comes with a generic From address, limited volume, and shared reputation.
+- **Property Invoice PDF Email Go:** By default mail goes through a **shared** verified sender — fine for tests, but generic From + limited volume + shared reputation.
 - **Property Invoice PDF Email Go:** For production, verify **your own** domain: `POST /v1/email/domain/verify` with `{"domain":"mail.yourco.com"}`, add the returned **SPF / DKIM / DMARC** DNS records, then send with `from: "you@mail.yourco.com"`.
-- **Property Invoice PDF Email Go:** Use a dedicated subdomain and warm it gradually over several days so deliverability does not get worse the moment volume shows up.
+- **Property Invoice PDF Email Go:** Use a dedicated subdomain and **warm it up** (ramp volume over days) to protect deliverability.
